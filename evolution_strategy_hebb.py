@@ -5,8 +5,10 @@ import time
 from os.path import exists
 from os import mkdir
 from gym.spaces import Discrete, Box
+
+import CoppeliaGym
 import gym
-import pybullet_envs 
+import pybullet_envs
 
 from fitness_functions import fitness_hebb
 
@@ -85,34 +87,46 @@ class EvolutionStrategyHebb(object):
             self.coefficients_per_synapse = 6
         else:
             raise ValueError('The provided Hebbian rule is not valid')
-            
-       
-        # Look up observation and action space dimension
-        env = gym.make(environment)    
-        if len(env.observation_space.shape) == 3:     # Pixel-based environment
-            self.pixel_env = True
-        elif len(env.observation_space.shape) == 1:   # State-based environment 
-            self.pixel_env = False
-            input_dim = env.observation_space.shape[0]
-        elif isinstance(env.observation_space, Discrete):
-            self.pixel_env = False
-            input_dim = env.observation_space.n
-        else:
-            raise ValueError('Observation space not supported')
+           
+        def init_dim(environment, pixel_env, input_dim, action_dim):
+            # Look up observation and action space dimension
+            env = gym.make(environment)    
+            if len(env.observation_space.shape) == 3:     # Pixel-based environment
+                pixel_env.value = 1
+            elif len(env.observation_space.shape) == 1:   # State-based environment 
+                pixel_env.value = 0
+                input_dim.value = env.observation_space.shape[0]
+            elif isinstance(env.observation_space, Discrete):
+                pixel_env.value = 0
+                input_dim.value = env.observation_space.n
+            else:
+                raise ValueError('Observation space not supported')
 
-        if isinstance(env.action_space, Box):
-            action_dim = env.action_space.shape[0]
-        elif isinstance(env.action_space, Discrete):
-            action_dim = env.action_space.n
-        else:
-            raise ValueError('Action space not supported')
+            if isinstance(env.action_space, Box):
+                action_dim.value = env.action_space.shape[0]
+            elif isinstance(env.action_space, Discrete):
+                action_dim.value = env.action_space.n
+            else:
+                raise ValueError('Action space not supported')
+
+            env.close()
+        
+        _pixel_env = mp.Value('i')
+        _input_dim = mp.Value('i')
+        _action_dim = mp.Value('i')
+
+        p = mp.Process(target=init_dim, args=(environment, _pixel_env, _input_dim, _action_dim))
+        p.start()
+        p.join()
+
+        self.pixel_env = True if _pixel_env.value == 1 else False
+        input_dim = _input_dim.value
+        action_dim = _action_dim.value
         
         # Intial weights co-evolution flag:
         self.coevolve_init = True if self.init_weights == 'coevolve' else False
         if self.coevolve_init:
             print('\nCo-evolving initial weights of the network')
-       
-
                     
         # Initialize the values of hebbian coefficients and CNN parameters or initial weights of co-evolving initial weights   
         
@@ -166,7 +180,6 @@ class EvolutionStrategyHebb(object):
                     
         # Load fitness function for the selected environment          
         self.get_reward = fitness_hebb
-            
             
     def _get_params_try(self, w, p):
 
@@ -231,7 +244,7 @@ class EvolutionStrategyHebb(object):
                     heb_coeffs_try1.append(self.coeffs[index] + jittered) 
                 heb_coeffs_try = np.array(heb_coeffs_try1).astype(np.float32)
 
-                worker_args.append( (self.get_reward, self.hebb_rule, self.environment,  self.init_weights,  heb_coeffs_try) )
+                worker_args.append((self.get_reward, self.hebb_rule, self.environment,  self.init_weights,  heb_coeffs_try))
                 
             rewards  = pool.map(worker_process_hebb, worker_args)
             

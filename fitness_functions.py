@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 from typing import List, Any
 
+import CoppeliaGym
+
 from policies import MLP_heb, CNN_heb
 from hebbian_weights_update import *
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
@@ -54,13 +56,13 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evo
     
 
     with torch.no_grad():
-                    
+
         # Load environment
         try:
             env = gym.make(environment, verbose = 0)
         except:
             env = gym.make(environment)
-            
+        
         # env.render()  # bullet envs
         
         # For environments with several intra-episode lives -eg. Breakout-
@@ -229,7 +231,6 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evo
                 list(p.parameters())[b].data /= list(p.parameters())[b].__abs__().max()
                 list(p.parameters())[c].data /= list(p.parameters())[c].__abs__().max()
         
-            
         env.close()
 
     return rew_ep
