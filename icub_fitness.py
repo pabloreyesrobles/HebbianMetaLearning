@@ -14,7 +14,7 @@ from hebbian_weights_update import *
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 
 
-def fitness_hebb(hebb_rule : str, environment : gym.Env, init_weights = 'uni' , *evolved_parameters: List[np.array]) -> float:
+def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evolved_parameters: List[np.array], goal: List[np.array]) -> float:
     """
     Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
     The initial weights are either co-evolved (if 'init_weights' == 'coevolve') along with the Hebbian coefficients or randomly sampled at each episode from the 'init_weights' distribution. 
@@ -58,54 +58,21 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, init_weights = 'uni' , 
     with torch.no_grad():
 
         # Load environment
-        # try:
-        #     env = gym.make(environment, verbose = 0)
-        # except:
-        #     env = gym.make(environment)
+        try:
+            env = gym.make(environment, verbose = 0)
+        except:
+            env = gym.make(environment)
         
         # env.render()  # bullet envs
-        env = environment
-        
-        # For environments with several intra-episode lives -eg. Breakout-
-        try: 
-            if 'FIRE' in env.unwrapped.get_action_meanings():
-                env = FireEpisodicLifeEnv(env)
-        except: 
-            pass
+        pixel_env = False
 
-        # Check if selected env is pixel or state-vector 
-        if len(env.observation_space.shape) == 3:     # Pixel-based environment
-            pixel_env = True
-            env = w.ResizeObservation(env, 84)        # Resize and normilise input   
-            env = ScaledFloatFrame(env)
-            input_channels = 3
-        elif len(env.observation_space.shape) == 1:   
-            pixel_env = False
-            input_dim = env.observation_space.shape[0]
-        elif len(env.observation_space.shape) == 0:   
-            pixel_env = False
-            input_dim = env.observation_space.n
-        else: #None
-            pixel_env = False
-            # Specific for icub-skin environment
-            input_dim = env.observation_space['left_arm'].shape[0] + 2
-            
-        # Determine action space dimension
-        if isinstance(env.action_space, Box):
-            action_dim = env.action_space.shape[0]
-        elif isinstance(env.action_space, Discrete):
-            action_dim = env.action_space.n
-        elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
-            action_dim = env.observation_space['left_arm'].shape[0]
-        else:
-            raise ValueError('Only Box and Discrete action spaces supported')
-        
-        # Initialise policy network: with CNN layer for pixel envs and simple MLP for state-vector envs
-        if pixel_env == True: 
-            p = CNN_heb(input_channels, action_dim)      
-        else:
-            p = MLP_heb(input_dim, action_dim)          
-        
+        # Specific for icub-skin environment
+        # Input dimension: current left arm position +  desired 2D touch point
+        input_dim = env.observation_space['left_arm'].shape[0] + 2
+        # Action dimension: left arm desired position
+        action_dim = env.observation_space['left_arm'].shape[0]
+        # MLP model with hebbian coefficients
+        p = MLP_heb(input_dim, action_dim)                  
         
         # Initialise weights of the policy network with an specific distribution or with the co-evolved weights
         if coevolve_init:
@@ -134,18 +101,16 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, init_weights = 'uni' , 
         weights2_3 = weights2_3.detach().numpy()
         weights3_4 = weights3_4.detach().numpy()
 
-        observation = env.reset() 
+        if environment == 'icub_skin-v0':
+            observation 
+        else:
+            observation = env.reset() 
         if pixel_env: observation = np.swapaxes(observation,0,2) #(3, 84, 84)       
 
-        # Burnout phase for the bullet quadruped so it starts off from the floor
-        if environment == 'AntBulletEnv-v0':
-            action = np.zeros(8)
-            for _ in range(40):
-                __ = env.step(action)        
-        
+        observation = np.concatenate([env.get_obs()['joints']['left_arm'], goal])
+
         # Normalize weights flag for non-bullet envs
         normalised_weights = False if environment[-12:-6] == 'Bullet' else True
-
 
         # Inner loop
         neg_count = 0
@@ -153,31 +118,18 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, init_weights = 'uni' , 
         t = 0
         while True:
             
-            # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
-            if isinstance(env.observation_space, Discrete): 
-                observation = (observation == torch.arange(env.observation_space.n)).float()
             
             o0, o1, o2, o3 = p([observation])
             o0 = o0.numpy()
             o1 = o1.numpy()
             o2 = o2.numpy()
-            
-            # Bounding the action space
-            if environment == 'CarRacing-v0':
-                action = np.array([ torch.tanh(o3[0]), torch.sigmoid(o3[1]), torch.sigmoid(o3[2]) ]) 
-                o3 = o3.numpy()
-            elif environment[-12:-6] == 'Bullet':
-                o3 = torch.tanh(o3).numpy()
-                action = o3
-            else: 
-                if isinstance(env.action_space, Box):
-                    action = o3.numpy()                        
-                    action = np.clip(action, env.action_space.low, env.action_space.high)  
-                elif isinstance(env.action_space, Discrete):
-                    action = np.argmax(o3).numpy()
-                o3 = o3.numpy()
 
-            
+            o3 = o3.numpy()                        
+            o3 = np.clip(o3, env.action_space['left_arm'].low, env.action_space['left_arm'].high) 
+
+            # action = action_home(env) # From functions.py of icub-skin repo
+            action['left_arm'][0:7] = np.double(o3)
+                        
             # Environment simulation step
             observation, reward, done, info = env.step(action)  
             if environment == 'AntBulletEnv-v0': reward = env.unwrapped.rewards[1] # Distance walked

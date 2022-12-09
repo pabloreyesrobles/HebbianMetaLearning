@@ -6,9 +6,8 @@ from os.path import exists
 from os import mkdir
 from gym.spaces import Discrete, Box
 
-import CoppeliaGym
 import gym
-import pybullet_envs
+#import pybullet_envs
 
 from fitness_functions import fitness_hebb
 
@@ -89,8 +88,12 @@ class EvolutionStrategyHebb(object):
             raise ValueError('The provided Hebbian rule is not valid')
            
         def init_dim(environment, pixel_env, input_dim, action_dim):
-            # Look up observation and action space dimension
-            env = gym.make(environment)    
+            if not isinstance(environment, gym.Env):
+                # Look up observation and action space dimension
+                env = gym.make(environment)
+            else:
+                env = environment
+            
             if len(env.observation_space.shape) == 3:     # Pixel-based environment
                 pixel_env.value = 1
             elif len(env.observation_space.shape) == 1:   # State-based environment 
@@ -355,7 +358,7 @@ class EvolutionStrategyHebb(object):
             # Evolution of Hebbian coefficients
             else:
                 population = self._get_population()                                                                 # Sample normal noise:         Step 5
-                rewards = self._get_rewards(pool, population)                                                       # Compute population fitness:  Step 6
+                rewards = self._get_rewards(pool, population) # Here desired touch point should be added                                                   # Compute population fitness:  Step 6
                 self._update_coeffs(rewards, population)                                                            # Update coefficients:         Steps 8->12
                 
                 
