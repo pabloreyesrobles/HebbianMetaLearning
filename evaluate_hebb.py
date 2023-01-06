@@ -9,14 +9,26 @@ import pickle
 import argparse
 import sys
 
+from typing import List, Any
+
 from hebbian_weights_update import *
 from policies import MLP_heb, CNN_heb
 from wrappers import ScaledFloatFrame
 
+import gym_icub_skin
+from functions import *
+import yarp
+
 gym.logger.set_level(40)
 
+def norm_goal(goal):
+    return (goal - 250.0) / 250.0
 
-def evaluate_hebb(hebb_rule : str, environment : str, init_weights = 'uni', render = True , *evolved_parameters: [np.array]) -> None:
+# For arm denorm from tanh
+def denorm(x, low, high):
+    return (high - low) * ((x + 1) / 2) + low
+
+def evaluate_hebb(hebb_rule : str, environment : str, init_weights = 'uni', render = True, *evolved_parameters: List[np.array]) -> None:
     """
     Copypasta function from fitness_functions::fitness_hebb
     It adds rendering of the environment and prints the cumulative episodic reward
@@ -54,35 +66,22 @@ def evaluate_hebb(hebb_rule : str, environment : str, init_weights = 'uni', rend
     with torch.no_grad():
                     
         # Load environment
-        try: env = gym.make(environment, verbose = 0)
-        except: env = gym.make(environment)
-                        
-        if environment[-12:-6] == 'Bullet' and render:
-            env.render()  # bullet envs            
+        # try:
+        #     env = gym.make(environment, verbose = 0)
+        # except:
+        #     env = gym.make(environment)
+        env = gym.make(environment)       
 
-        # Check if selected env is pixel or state-vector 
-        if len(env.observation_space.shape) == 3:     # Pixel-based environment
-            pixel_env = True
-            env = w.ResizeObservation(env, 84)        # Resize and normilise input   
-            env = ScaledFloatFrame(env)
-            input_channels = 3
-        elif len(env.observation_space.shape) == 1:   # State-based environment (only valid for with a 'Box' observational space)
-            pixel_env = False
-            input_dim = env.observation_space.shape[0]
-            
-        # Determine action space dimension
-        if isinstance(env.action_space, Box):
-            action_dim = env.action_space.shape[0]
-        elif isinstance(env.action_space, Discrete):
-            action_dim = env.action_space.n
-        else:
-            raise ValueError('Only Box and Discrete action spaces supported')
-        
-        # Initialise policy network: A simple MLP for state-vector environments and a CNN+MLP for pixel-based environments
-        if pixel_env == True: 
-            p = CNN_heb(input_channels, action_dim)      
-        else:
-            p = MLP_heb(input_dim, action_dim)          
+        # env.render()  # bullet envs
+        pixel_env = False
+
+        # Specific for icub-skin environment
+        # Input dimension: current left arm position +  desired 2D touch point
+        input_dim = 2 # 2 + env.observation_space['joints']['left_arm'].shape[0] 
+        # Action dimension: left arm desired position
+        action_dim = 7 # env.action_space['left_arm'].shape[0]
+        # MLP model with hebbian coefficients
+        p = MLP_heb(input_dim, action_dim)         
         
         # Initialise weights of the policy network with an specific distribution or with the co-evolved weights
         if coevolve_init:
@@ -108,70 +107,62 @@ def evaluate_hebb(hebb_rule : str, environment : str, init_weights = 'uni', rend
         weights1_2 = weights1_2.detach().numpy()
         weights2_3 = weights2_3.detach().numpy()
         weights3_4 = weights3_4.detach().numpy()
-        
-        observation = env.reset() 
-        if pixel_env: observation = np.swapaxes(observation,0,2) #(3, 84, 84)       
+           
 
-        # Burnout phase for the bullet quadruped so it starts off from the floor
-        if environment == 'AntBulletEnv-v0':
-            action = np.zeros(8)
-            for _ in range(40):
-                __ = env.step(action)        
-        
         # normalised_weights = True
-        normalised_weights = False if environment[-12:-6] == 'Bullet' else True
+        normalised_weights = True
 
         neg_count = 0
         rew_ep = 0
         t = 0
-        while True:
+
+        modes = yarp.VectorInt(16)
+        icontrol = [drv['driver'].viewIControlMode() for drv in env.motor_drivers]
+
+        for ic in icontrol:
+            ic.getControlModes(modes.data())
+            for i in range(modes.length()):
+                if modes[i] == yarp.VOCAB_CM_HW_FAULT:
+                    modes[i] = yarp.VOCAB_CM_FORCE_IDLE
+            ic.setControlModes(modes.data())
+
+            for i in range(modes.length()):
+                if modes[i] == yarp.VOCAB_CM_FORCE_IDLE:
+                    modes[i] = yarp.VOCAB_CM_POSITION
+            ic.setControlModes(modes.data())
+
+        env.reset()
+
+        goal = np.array(test_grid())
+
+        for i_g, g in enumerate(goal):
             
+            observation = norm_goal(g)
             o0, o1, o2, o3 = p([observation])
             o0 = o0.numpy()
             o1 = o1.numpy()
             o2 = o2.numpy()
             
-            # Adding bounds to the action space
-            if environment == 'CarRacing-v0':
-                action = np.array([ torch.tanh(o3[0]), torch.sigmoid(o3[1]), torch.sigmoid(o3[2]) ]) 
-                o3 = o3.numpy()
-            elif environment[-12:-6] == 'Bullet':
-                o3 = torch.tanh(o3).numpy()
-                action = o3
-            else: 
-                if isinstance(env.action_space, Box):
-                    action = o3.numpy()
-                    action = np.clip(action, env.action_space.low, env.action_space.high)                           
-                elif isinstance(env.action_space, Discrete):
-                    action = np.argmax(o3).numpy()
-                o3 = o3.numpy()
+            o3 = torch.tanh(o3).numpy()
+            # o3 = o3.numpy()
+            # o3 = np.clip(o3, env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7])
+
+            low = env.action_space['left_arm'].low[0:7] - home_pose()[0:7]
+            high = env.action_space['left_arm'].high[0:7] - home_pose()[0:7]
+            delta = 0.5 * denorm(o3, low, high)
+
+            action = action_home(env) # From functions.py of icub-skin repo
+
+            action['left_arm'][0:7] += o3 * 40.0
+            action['left_arm'][0:7] = np.clip(action['left_arm'][0:7], env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]) 
             
             # Environment simulation step
             observation, reward, done, info  = env.step(action)  
-            if environment == 'AntBulletEnv-v0':
-                reward = env.unwrapped.rewards[1] # Distance walked
+            torso = observation['touch']['torso']
+
+            if (torso[0] + torso[1]) > 0:
+                rew_ep += 20.0 * np.exp(-12.5 * np.linalg.norm(g - np.array(torso)) / np.linalg.norm(np.array([500, 500])))
             rew_ep += reward
-            
-            # Render
-            if environment[-12:-6] != 'Bullet' and render:
-                env.render('human') # Gym envs
-            
-            if pixel_env: observation = np.swapaxes(observation,0,2) #(3, 84, 84)
-                            
-            # Breaking conditions
-            if environment == 'CarRacing-v0':
-                neg_count = neg_count+1 if reward < 0.0 else 0
-                if (done or neg_count > 20):
-                    break
-            elif environment[-12:-6] == 'Bullet':
-                if t > 200:
-                    neg_count = neg_count+1 if reward < 0.0 else 0
-                    if (done or neg_count > 30):
-                        break
-            else:
-                if done:
-                    break
-            t += 1
             
             #### Episodic/Intra-life hebbian update of the weights
             if hebb_rule == 'A': 

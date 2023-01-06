@@ -13,8 +13,17 @@ from policies import MLP_heb, CNN_heb
 from hebbian_weights_update import *
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 
+from functions import *
+import yarp
 
-def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evolved_parameters: List[np.array], goal: List[np.array]) -> float:
+def norm_goal(goal):
+    return (goal - 250.0) / 250.0
+
+# For arm denorm from tanh
+def denorm(x, low, high):
+    return (high - low) * ((x + 1) / 2) + low
+
+def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], init_weights = 'uni', *evolved_parameters: List[np.array]) -> float:
     """
     Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
     The initial weights are either co-evolved (if 'init_weights' == 'coevolve') along with the Hebbian coefficients or randomly sampled at each episode from the 'init_weights' distribution. 
@@ -58,19 +67,20 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evo
     with torch.no_grad():
 
         # Load environment
-        try:
-            env = gym.make(environment, verbose = 0)
-        except:
-            env = gym.make(environment)
+        # try:
+        #     env = gym.make(environment, verbose = 0)
+        # except:
+        #     env = gym.make(environment)
+        env = environment
         
         # env.render()  # bullet envs
         pixel_env = False
 
         # Specific for icub-skin environment
         # Input dimension: current left arm position +  desired 2D touch point
-        input_dim = env.observation_space['left_arm'].shape[0] + 2
+        input_dim = 2 # 2 + env.observation_space['joints']['left_arm'].shape[0] 
         # Action dimension: left arm desired position
-        action_dim = env.observation_space['left_arm'].shape[0]
+        action_dim = 7 # env.action_space['left_arm'].shape[0]
         # MLP model with hebbian coefficients
         p = MLP_heb(input_dim, action_dim)                  
         
@@ -101,64 +111,79 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evo
         weights2_3 = weights2_3.detach().numpy()
         weights3_4 = weights3_4.detach().numpy()
 
-        if environment == 'icub_skin-v0':
-            observation 
-        else:
-            observation = env.reset() 
-        if pixel_env: observation = np.swapaxes(observation,0,2) #(3, 84, 84)       
-
-        observation = np.concatenate([env.get_obs()['joints']['left_arm'], goal])
-
         # Normalize weights flag for non-bullet envs
-        normalised_weights = False if environment[-12:-6] == 'Bullet' else True
+        normalised_weights = True
 
         # Inner loop
         neg_count = 0
         rew_ep = 0
         t = 0
-        while True:
+
+        modes = yarp.VectorInt(16)
+        icontrol = [drv['driver'].viewIControlMode() for drv in env.motor_drivers]
+
+        for ic in icontrol:
+            ic.getControlModes(modes.data())
+            for i in range(modes.length()):
+                if modes[i] == yarp.VOCAB_CM_HW_FAULT:
+                    modes[i] = yarp.VOCAB_CM_FORCE_IDLE
+            ic.setControlModes(modes.data())
+
+            for i in range(modes.length()):
+                if modes[i] == yarp.VOCAB_CM_FORCE_IDLE:
+                    modes[i] = yarp.VOCAB_CM_POSITION
+            ic.setControlModes(modes.data())
+
+        env.reset()
+
+        for i_g, g in enumerate(goal):
             
-            
+            # Verify HW_FAULT
+            for ic in icontrol:
+                ic.getControlModes(modes.data())
+                for i in range(modes.length()):
+                    if modes[i] == yarp.VOCAB_CM_HW_FAULT:
+                        modes[i] = yarp.VOCAB_CM_FORCE_IDLE
+                ic.setControlModes(modes.data())
+
+                for i in range(modes.length()):
+                    if modes[i] == yarp.VOCAB_CM_FORCE_IDLE:
+                        modes[i] = yarp.VOCAB_CM_POSITION
+                ic.setControlModes(modes.data())
+
+            def norm_cmd(cmd):
+                arm_low, arm_high = env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]
+                return 2 * (cmd - arm_low) / (arm_high - arm_low) - 1
+
+            #observation = np.concatenate([norm_cmd(env.get_obs()['joints']['left_arm'][0:7]), norm_goal(g)])
+            observation = norm_goal(g)
+
             o0, o1, o2, o3 = p([observation])
             o0 = o0.numpy()
             o1 = o1.numpy()
             o2 = o2.numpy()
 
-            o3 = o3.numpy()                        
-            o3 = np.clip(o3, env.action_space['left_arm'].low, env.action_space['left_arm'].high) 
+            o3 = torch.tanh(o3).numpy()
+            # o3 = o3.numpy()
+            # o3 = np.clip(o3, env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7])
 
-            # action = action_home(env) # From functions.py of icub-skin repo
-            action['left_arm'][0:7] = np.double(o3)
-                        
+            low = env.action_space['left_arm'].low[0:7] - home_pose()[0:7]
+            high = env.action_space['left_arm'].high[0:7] - home_pose()[0:7]
+            delta = 0.5 * denorm(o3, low, high)
+
+            action = action_home(env) # From functions.py of icub-skin repo
+
+            action['left_arm'][0:7] += o3 * 40.0
+            action['left_arm'][0:7] = np.clip(action['left_arm'][0:7], env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]) 
+            # action['left_arm'][0:7] += delta
+
             # Environment simulation step
-            observation, reward, done, info = env.step(action)  
-            if environment == 'AntBulletEnv-v0': reward = env.unwrapped.rewards[1] # Distance walked
-            rew_ep += reward
-            
-            # env.render('human') # Gym envs
-            
-            if pixel_env: observation = np.swapaxes(observation,0,2) #(3, 84, 84)
-                                       
-            # Early stopping conditions
-            if environment == 'CarRacing-v0':
-                neg_count = neg_count+1 if reward < 0.0 else 0
-                if (done or neg_count > 20):
-                    break
-            elif environment[-12:-6] == 'Bullet':
-                if t > 200:
-                    neg_count = neg_count+1 if reward < 0.0 else 0
-                    if (done or neg_count > 30):
-                        break
-            else:
-                if done:
-                    break
-            # else:
-            #     neg_count = neg_count+1 if reward < 0.0 else 0
-            #     if (done or neg_count > 50):
-            #         break
-            
-            t += 1
-            
+            observation, reward, done, info = env.step(action)
+            torso = observation['touch']['torso']
+
+            if (torso[0] + torso[1]) > 0:
+                rew_ep += 25.0 * np.exp(-15.0 * np.linalg.norm(g - np.array(torso)) / np.linalg.norm(np.array([500, 500])))
+            #rew_ep += reward
             
             #### Episodic/Intra-life hebbian update of the weights
             if hebb_rule == 'A': 
@@ -190,7 +215,7 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights = 'uni' , *evo
                 list(p.parameters())[b].data /= list(p.parameters())[b].__abs__().max()
                 list(p.parameters())[c].data /= list(p.parameters())[c].__abs__().max()
         
-        env.close()
+        #env.close()
 
     return rew_ep
     # return max(rew_ep, 0)

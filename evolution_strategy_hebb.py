@@ -4,13 +4,22 @@ import torch
 import time
 from os.path import exists
 from os import mkdir
-from gym.spaces import Discrete, Box
+from gym.spaces import Discrete, Box, Dict
 
 import gym
 #import pybullet_envs
 
-from fitness_functions import fitness_hebb
+#from fitness_functions import fitness_hebb
+from icub_fitness import fitness_hebb
+import gym_icub_skin
+from sklearn.model_selection import train_test_split
+from functions import *
 
+def rand_bounds(bounds, n=1):
+    widths = np.tile(bounds[1, :] - bounds[0, :], (n, 1))
+    return widths * np.random.rand(n, bounds.shape[1]) + np.tile(bounds[0, :], (n, 1))
+
+bounds = np.array([[0, 0], [500, 500]])
 
 def compute_ranks(x):
   """
@@ -86,15 +95,32 @@ class EvolutionStrategyHebb(object):
             self.coefficients_per_synapse = 6
         else:
             raise ValueError('The provided Hebbian rule is not valid')
-           
-        def init_dim(environment, pixel_env, input_dim, action_dim):
-            if not isinstance(environment, gym.Env):
-                # Look up observation and action space dimension
-                env = gym.make(environment)
-            else:
-                env = environment
-            
-            if len(env.observation_space.shape) == 3:     # Pixel-based environment
+        
+        # Look up observation and action space dimension
+        env = gym.make(environment)
+        print(environment)
+
+        if environment == 'icub_skin-v0':
+            self.env = env
+            self.env.metadata['maxEpisodeSteps'] = 20
+
+        def init_dim(env, pixel_env, input_dim, action_dim):
+            # if not isinstance(environment, gym.Env):
+            #     # Look up observation and action space dimension
+            #     env = gym.make(environment)
+            #     print(environment)
+
+            #     if environment == 'icub_skin-v0':
+            #         self.env = env
+            #         self.env.metadata['maxEpisodeSteps'] = 20
+            # else:
+            #     env = environment
+
+            if isinstance(env.observation_space, Dict): #None
+                pixel_env.value = 0
+                # Specific for icub-skin environment
+                input_dim.value = 2 # 2 + env.observation_space['joints']['left_arm'].shape[0] 
+            elif len(env.observation_space.shape) == 3:     # Pixel-based environment
                 pixel_env.value = 1
             elif len(env.observation_space.shape) == 1:   # State-based environment 
                 pixel_env.value = 0
@@ -109,16 +135,18 @@ class EvolutionStrategyHebb(object):
                 action_dim.value = env.action_space.shape[0]
             elif isinstance(env.action_space, Discrete):
                 action_dim.value = env.action_space.n
+            elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
+                action_dim.value = 7 # env.action_space['left_arm'].shape[0]
             else:
                 raise ValueError('Action space not supported')
 
-            env.close()
+            #env.close()
         
         _pixel_env = mp.Value('i')
         _input_dim = mp.Value('i')
         _action_dim = mp.Value('i')
 
-        p = mp.Process(target=init_dim, args=(environment, _pixel_env, _input_dim, _action_dim))
+        p = mp.Process(target=init_dim, args=(self.env, _pixel_env, _input_dim, _action_dim))
         p.start()
         p.join()
 
@@ -160,7 +188,7 @@ class EvolutionStrategyHebb(object):
                 
         # State-vector environments (MLP)            
         else:
-            plastic_weights = (128*input_dim) + (64*128) + (action_dim*64)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
+            plastic_weights = (64*input_dim) + (32*64) + (action_dim*32)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
             
             # Co-evolution of initial weights
             if self.coevolve_init:
@@ -180,7 +208,7 @@ class EvolutionStrategyHebb(object):
                     self.coeffs = torch.randn(plastic_weights, self.coefficients_per_synapse).detach().numpy().squeeze() 
                     
                     
-                    
+        self.train_set, self.test_set = train_test_split(test_grid(), test_size=0.25)
         # Load fitness function for the selected environment          
         self.get_reward = fitness_hebb
             
@@ -247,15 +275,27 @@ class EvolutionStrategyHebb(object):
                     heb_coeffs_try1.append(self.coeffs[index] + jittered) 
                 heb_coeffs_try = np.array(heb_coeffs_try1).astype(np.float32)
 
-                worker_args.append((self.get_reward, self.hebb_rule, self.environment,  self.init_weights,  heb_coeffs_try))
+                if self.environment == 'icub_skin-v0':
+                    goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
+                    worker_args.append((self.get_reward, self.hebb_rule, self.env, goals,  self.init_weights,  heb_coeffs_try))
+                else:
+                    goals = np.array([])
+                    worker_args.append((self.get_reward, self.hebb_rule, self.environment,  self.init_weights,  heb_coeffs_try, goals))
                 
             rewards  = pool.map(worker_process_hebb, worker_args)
             
         else:
             rewards = []
+            goals = np.array(self.train_set) # np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
             for p in population:
                 heb_coeffs_try = np.array(self._get_params_try(self.coeffs, p))
-                rewards.append(self.get_reward( self.hebb_rule, self.environment,  self.init_weights, heb_coeffs_try))
+
+                if self.environment == 'icub_skin-v0':
+                    #goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
+                    rewards.append(self.get_reward( self.hebb_rule, self.env, goals, self.init_weights, heb_coeffs_try))
+                else:
+                    goals = np.array([])
+                    rewards.append(self.get_reward( self.hebb_rule, self.environment,  self.init_weights, heb_coeffs_try, goals))
         
         rewards = np.array(rewards).astype(np.float32)
         return rewards
