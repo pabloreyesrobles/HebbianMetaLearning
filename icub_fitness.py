@@ -156,13 +156,15 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
                 return 2 * (cmd - arm_low) / (arm_high - arm_low) - 1
 
             #observation = np.concatenate([norm_cmd(env.get_obs()['joints']['left_arm'][0:7]), norm_goal(g)])
-            observation = norm_goal(g)
+            #observation = norm_goal(g)
+            observation = env.get_obs()['skin']['torso'] # + iarm.getPose() or maybe included in env.get_obs()
 
             o0, o1, o2, o3 = p([observation])
             o0 = o0.numpy()
             o1 = o1.numpy()
             o2 = o2.numpy()
 
+            # TODO: check what is the best activation for the end effector pose
             o3 = torch.tanh(o3).numpy()
             # o3 = o3.numpy()
             # o3 = np.clip(o3, env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7])
@@ -177,10 +179,13 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
             action['left_arm'][0:7] = np.clip(action['left_arm'][0:7], env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]) 
             # action['left_arm'][0:7] += delta
 
+            # TODO: action will be current pose += o3
+
             # Environment simulation step
             observation, reward, done, info = env.step(action)
             torso = observation['touch']['torso']
 
+            # TODO: no nearby point search criteria needed
             if (torso[0] + torso[1]) > 0:
                 rew_ep += 25.0 * np.exp(-15.0 * np.linalg.norm(g - np.array(torso)) / np.linalg.norm(np.array([500, 500])))
             #rew_ep += reward

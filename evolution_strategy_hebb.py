@@ -119,7 +119,8 @@ class EvolutionStrategyHebb(object):
             if isinstance(env.observation_space, Dict): #None
                 pixel_env.value = 0
                 # Specific for icub-skin environment
-                input_dim.value = 2 # 2 + env.observation_space['joints']['left_arm'].shape[0] 
+                effector_pose_size = 7
+                input_dim.value = effector_pose_size + env.N_TAXELS_TORSO # 2 + env.observation_space['joints']['left_arm'].shape[0] 
             elif len(env.observation_space.shape) == 3:     # Pixel-based environment
                 pixel_env.value = 1
             elif len(env.observation_space.shape) == 1:   # State-based environment 
@@ -136,7 +137,8 @@ class EvolutionStrategyHebb(object):
             elif isinstance(env.action_space, Discrete):
                 action_dim.value = env.action_space.n
             elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
-                action_dim.value = 7 # env.action_space['left_arm'].shape[0]
+                effector_action_size = 6 # up, down, left, right, forward and backward
+                action_dim.value = effector_action_size # env.action_space['left_arm'].shape[0]
             else:
                 raise ValueError('Action space not supported')
 
@@ -188,7 +190,7 @@ class EvolutionStrategyHebb(object):
                 
         # State-vector environments (MLP)            
         else:
-            plastic_weights = (64*input_dim) + (32*64) + (action_dim*32)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
+            plastic_weights = (128*input_dim) + (64*128) + (action_dim*64)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
             
             # Co-evolution of initial weights
             if self.coevolve_init:
