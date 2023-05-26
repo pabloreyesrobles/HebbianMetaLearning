@@ -1,0 +1,5 @@
+iter    1 | reward:   3 |  update_factor: 0.057143  lr: 0.199000 | sum_coeffs: -768 sum_abs_coeffs: 459006
+iter    2 | reward:   0 |  update_factor: 0.056914  lr: 0.198005 | sum_coeffs: -390 sum_abs_coeffs: 481465
+iter    3 | reward:   3 |  update_factor: 0.056686  lr: 0.197015 | sum_coeffs: -592 sum_abs_coeffs: 512026
+iter    4 | reward:   9 |  update_factor: 0.056459  lr: 0.196030 | sum_coeffs: -565 sum_abs_coeffs: 532106
+iter    5 | reward:   1 |  update_factor: 0.056233  lr: 0.195050 | sum_coeffs: -533 sum_abs_coeffs: 560266

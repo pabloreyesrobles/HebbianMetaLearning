@@ -1,0 +1,1 @@
+iter    1 | reward:   1 |  update_factor: 0.133333  lr: 0.199000 | sum_coeffs: -710 sum_abs_coeffs: 484747

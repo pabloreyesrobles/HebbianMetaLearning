@@ -72,7 +72,8 @@ class EvolutionStrategyHebb(object):
         self.decay = decay
         self.num_threads = mp.cpu_count() if num_threads == -1 else num_threads
         self.update_factor = self.learning_rate / (self.POPULATION_SIZE * self.SIGMA)
-        self.distribution = distribution                      
+        self.distribution = distribution
+        self.iteration = 0                    
 
         # The number of hebbian coefficients per synapse
         if hebb_rule == 'A':                                                     
@@ -102,7 +103,7 @@ class EvolutionStrategyHebb(object):
 
         if environment == 'icub_skin-v0':
             self.env = env
-            self.env.metadata['maxEpisodeSteps'] = 20
+        #     self.env.metadata['maxEpisodeSteps'] = 20
 
         def init_dim(env, pixel_env, input_dim, action_dim):
             # if not isinstance(environment, gym.Env):
@@ -120,7 +121,8 @@ class EvolutionStrategyHebb(object):
                 pixel_env.value = 0
                 # Specific for icub-skin environment
                 effector_pose_size = 7
-                input_dim.value = effector_pose_size + env.N_TAXELS_TORSO # 2 + env.observation_space['joints']['left_arm'].shape[0] 
+                gaussian_kernels = 29
+                input_dim.value = effector_pose_size + gaussian_kernels #env.N_TAXELS_TORSO # 2 + env.observation_space['joints']['left_arm'].shape[0] 
             elif len(env.observation_space.shape) == 3:     # Pixel-based environment
                 pixel_env.value = 1
             elif len(env.observation_space.shape) == 1:   # State-based environment 
@@ -137,24 +139,54 @@ class EvolutionStrategyHebb(object):
             elif isinstance(env.action_space, Discrete):
                 action_dim.value = env.action_space.n
             elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
-                effector_action_size = 6 # up, down, left, right, forward and backward
+                effector_action_size = 3 # up, down, left, right, forward and backward
                 action_dim.value = effector_action_size # env.action_space['left_arm'].shape[0]
             else:
                 raise ValueError('Action space not supported')
 
-            #env.close()
+            env.close()
         
-        _pixel_env = mp.Value('i')
-        _input_dim = mp.Value('i')
-        _action_dim = mp.Value('i')
+        # _pixel_env = mp.Value('i')
+        # _input_dim = mp.Value('i')
+        # _action_dim = mp.Value('i')
 
-        p = mp.Process(target=init_dim, args=(self.env, _pixel_env, _input_dim, _action_dim))
-        p.start()
-        p.join()
+        # p = mp.Process(target=init_dim, args=(env, _pixel_env, _input_dim, _action_dim))
+        # p.start()
+        # p.join()
 
-        self.pixel_env = True if _pixel_env.value == 1 else False
-        input_dim = _input_dim.value
-        action_dim = _action_dim.value
+        # self.pixel_env = True if _pixel_env.value == 1 else False
+        # input_dim = _input_dim.value
+        # action_dim = _action_dim.value
+
+        if isinstance(env.observation_space, Dict): #None
+            pixel_env = 0
+            # Specific for icub-skin environment
+            effector_pose_size = 7
+            gaussian_kernels = 29
+            input_dim = effector_pose_size + gaussian_kernels #env.N_TAXELS_TORSO # 2 + env.observation_space['joints']['left_arm'].shape[0] 
+        elif len(env.observation_space.shape) == 3:     # Pixel-based environment
+            pixel_env = 1
+        elif len(env.observation_space.shape) == 1:   # State-based environment 
+            pixel_env = 0
+            input_dim = env.observation_space.shape[0]
+        elif isinstance(env.observation_space, Discrete):
+            pixel_env = 0
+            input_dim = env.observation_space.n
+        else:
+            raise ValueError('Observation space not supported')
+
+        if isinstance(env.action_space, Box):
+            action_dim = env.action_space.shape[0]
+        elif isinstance(env.action_space, Discrete):
+            action_dim = env.action_space.n
+        elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
+            effector_action_size = 3 # up, down, left, right, forward and backward
+            action_dim = effector_action_size # env.action_space['left_arm'].shape[0]
+        else:
+            raise ValueError('Action space not supported')
+
+        self.pixel_env = True if pixel_env == 1 else False
+        #env.close()
         
         # Intial weights co-evolution flag:
         self.coevolve_init = True if self.init_weights == 'coevolve' else False
@@ -278,8 +310,8 @@ class EvolutionStrategyHebb(object):
                 heb_coeffs_try = np.array(heb_coeffs_try1).astype(np.float32)
 
                 if self.environment == 'icub_skin-v0':
-                    goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
-                    worker_args.append((self.get_reward, self.hebb_rule, self.env, goals,  self.init_weights,  heb_coeffs_try))
+                    goals = np.array([rand_bounds(bounds)[0] for i in range(20)])
+                    worker_args.append((self.get_reward, self.hebb_rule, self.environment, goals,  self.init_weights,  heb_coeffs_try))
                 else:
                     goals = np.array([])
                     worker_args.append((self.get_reward, self.hebb_rule, self.environment,  self.init_weights,  heb_coeffs_try, goals))
@@ -288,9 +320,11 @@ class EvolutionStrategyHebb(object):
             
         else:
             rewards = []
-            goals = np.array(self.train_set) # np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
-            for p in population:
+            #goals = np.array(self.train_set) 
+            #goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
+            for i_p, p in enumerate(population):
                 heb_coeffs_try = np.array(self._get_params_try(self.coeffs, p))
+                goals = np.array([self.iteration, i_p])
 
                 if self.environment == 'icub_skin-v0':
                     #goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
@@ -388,7 +422,7 @@ class EvolutionStrategyHebb(object):
         generations_rewards = []
 
         for iteration in range(iterations):                                                                         # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
-
+            self.iteration = iteration
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
             if self.pixel_env or self.coevolve_init:                
                 population = self._get_population()                                                                 # Sample normal noise:         Step 5
@@ -407,9 +441,12 @@ class EvolutionStrategyHebb(object):
             # Print fitness and save Hebbian coefficients and/or Coevolved / CNNs parameters
             if (iteration + 1) % print_step == 0:
                 rew_ = rewards.mean()
-                print('iter %4i | reward: %3i |  update_factor: %f  lr: %f | sum_coeffs: %i sum_abs_coeffs: %4i' % (iteration + 1, rew_ , self.update_factor, self.learning_rate, int(np.sum(self.coeffs)), int(np.sum(abs(self.coeffs)))), flush=True)
+                print('iter %4i | reward: %3i | max_reward: %3i | update_factor: %f  lr: %f | sum_coeffs: %i sum_abs_coeffs: %4i' % (iteration + 1, rew_, rewards.max(), self.update_factor, self.learning_rate, int(np.sum(self.coeffs)), int(np.sum(abs(self.coeffs)))), flush=True)
                 
-                if rew_ > 100:
+                with open('output/' + id_ + '.txt', 'a+') as f: 
+                    f.write('iter %4i | reward: %3i | max_reward: %3i |  update_factor: %f  lr: %f | sum_coeffs: %i sum_abs_coeffs: %4i\n' % (iteration + 1, rew_, rewards.max(), self.update_factor, self.learning_rate, int(np.sum(self.coeffs)), int(np.sum(abs(self.coeffs)))))
+
+                if rew_ > 5:
                     torch.save(self.get_coeffs(),  path + "/"+ id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(int(rew_)) + '__' + self.hebb_rule + "__init_" + str(self.init_weights) + "__pop_" + str(self.POPULATION_SIZE) + '__coeffs' + "__{}.dat".format(iteration))
                     if self.coevolve_init:
                         torch.save(self.get_coevolved_parameters(),  path + "/"+ id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(int(rew_)) + '__' + self.hebb_rule + "__init_" + str(self.init_weights) + "__pop_" + str(self.POPULATION_SIZE) + '__coevolved_initial_weights' + "__{}.dat".format(iteration))
