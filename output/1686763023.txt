@@ -1,0 +1,2 @@
+iter    1 | reward:  10 | max_reward:  39 |  update_factor: 0.040000  lr: 0.199000 | sum_coeffs: 184 sum_abs_coeffs: 17952
+iter    2 | reward:   7 | max_reward:  38 |  update_factor: 0.039840  lr: 0.198005 | sum_coeffs: 160 sum_abs_coeffs: 18352

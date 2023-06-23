@@ -1,0 +1,7 @@
+iter    1 | reward:  13 | max_reward:  40 |  update_factor: 0.040000  lr: 0.199000 | sum_coeffs: -84 sum_abs_coeffs: 17918
+iter    2 | reward:   3 | max_reward:  39 |  update_factor: 0.039840  lr: 0.198005 | sum_coeffs: -73 sum_abs_coeffs: 18144
+iter    3 | reward:   4 | max_reward:  31 |  update_factor: 0.039680  lr: 0.197015 | sum_coeffs: -76 sum_abs_coeffs: 18566
+iter    4 | reward:   5 | max_reward:  31 |  update_factor: 0.039521  lr: 0.196030 | sum_coeffs: -51 sum_abs_coeffs: 18982
+iter    5 | reward:   3 | max_reward:  39 |  update_factor: 0.039363  lr: 0.195050 | sum_coeffs: -61 sum_abs_coeffs: 19379
+iter    6 | reward:   2 | max_reward:  10 |  update_factor: 0.039206  lr: 0.194075 | sum_coeffs: -78 sum_abs_coeffs: 19710
+iter    7 | reward:   3 | max_reward:  31 |  update_factor: 0.039049  lr: 0.193104 | sum_coeffs: -86 sum_abs_coeffs: 20016

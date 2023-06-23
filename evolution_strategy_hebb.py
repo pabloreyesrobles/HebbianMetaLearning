@@ -139,7 +139,7 @@ class EvolutionStrategyHebb(object):
             elif isinstance(env.action_space, Discrete):
                 action_dim.value = env.action_space.n
             elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
-                effector_action_size = 3 # up, down, left, right, forward and backward
+                effector_action_size = 7 # up, down, left, right, forward and backward
                 action_dim.value = effector_action_size # env.action_space['left_arm'].shape[0]
             else:
                 raise ValueError('Action space not supported')

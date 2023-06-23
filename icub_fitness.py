@@ -133,7 +133,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
         gaussian_kernels = 29
         input_dim = effector_pose_size + gaussian_kernels #env.N_TAXELS_TORSO # 2 + env.observation_space['joints']['left_arm'].shape[0] 
         # Action dimension: left arm desired position
-        action_dim = 3 # x, y, z
+        action_dim = 7 # x, y, z
         # MLP model with hebbian coefficients
         p = MLP_heb(input_dim, action_dim)                  
         
@@ -226,7 +226,8 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
         state = np.concatenate([observation['effector_pose'], np.zeros(29)]) #or maybe included in env.get_obs()
         no_reward_cnt = 0
 
-        for i_g in range(steps):
+        #for i_g in range(steps):
+        while True:
             
             def norm_cmd(cmd):
                 arm_low, arm_high = env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]
@@ -242,7 +243,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
             o2 = o2.numpy()
 
             # TODO: check what is the best activation for the end effector pose
-            o3 = torch.tanh(o3).numpy() * 0.05
+            o3 = torch.tanh(o3).numpy() 
             # o3 = o3.numpy()
             # o3 = np.clip(o3, env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7])
 
@@ -258,7 +259,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
 
             # TODO: action will be current pose += o3
             action = np.zeros(7)
-            action[:3] += o3
+            action += o3
 
             # Environment simulation step
             observation, reward, done, info = env.step(action)
@@ -306,7 +307,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
 
             state = np.concatenate([observation['effector_pose'], kernel_activations])
 
-            if no_reward_cnt == 10:
+            if no_reward_cnt == 15:
                 break
             
             #### Episodic/Intra-life hebbian update of the weights
@@ -342,7 +343,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
         #env.close()
     if rew_ep > 10:
         _, std = gp_regressor.predict_shape(pos_grid)
-        rew_ep += 5 * (init_std - np.mean(std)) / init_std # check factor
+        rew_ep += 25 * (init_std - np.mean(std)) / init_std # check factor
 
     return rew_ep
     # return max(rew_ep, 0)
