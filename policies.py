@@ -7,9 +7,9 @@ class MLP_heb(nn.Module):
     def __init__(self, input_space, action_space):
         super(MLP_heb, self).__init__()
 
-        self.fc1 = nn.Linear(input_space, 128, bias=False)
-        self.fc2 = nn.Linear(128, 64, bias=False)
-        self.fc3 = nn.Linear(64, action_space, bias=False)
+        self.fc1 = nn.Linear(input_space, 32, bias=False)
+        self.fc2 = nn.Linear(32, 16, bias=False)
+        self.fc3 = nn.Linear(16, action_space, bias=False)
 
     def forward(self, ob):
         state = torch.as_tensor(ob[0]).float().detach()

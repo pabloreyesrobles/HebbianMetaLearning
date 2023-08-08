@@ -14,6 +14,7 @@ from icub_fitness import fitness_hebb
 import gym_icub_skin
 from sklearn.model_selection import train_test_split
 from functions import *
+import h5py
 
 def rand_bounds(bounds, n=1):
     widths = np.tile(bounds[1, :] - bounds[0, :], (n, 1))
@@ -180,7 +181,7 @@ class EvolutionStrategyHebb(object):
         elif isinstance(env.action_space, Discrete):
             action_dim = env.action_space.n
         elif isinstance(env.action_space, Dict): # Specific for icub-skin environment
-            effector_action_size = 3 # up, down, left, right, forward and backward
+            effector_action_size = 7 # up, down, left, right, forward and backward
             action_dim = effector_action_size # env.action_space['left_arm'].shape[0]
         else:
             raise ValueError('Action space not supported')
@@ -222,7 +223,7 @@ class EvolutionStrategyHebb(object):
                 
         # State-vector environments (MLP)            
         else:
-            plastic_weights = (128*input_dim) + (64*128) + (action_dim*64)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
+            plastic_weights = (32*input_dim) + (16*32) + (action_dim*16)                                            #  Hebbian coefficients:  MLP x coefficients_per_synapse :plastic_weights x coefficients_per_synapse
             
             # Co-evolution of initial weights
             if self.coevolve_init:
@@ -324,7 +325,7 @@ class EvolutionStrategyHebb(object):
             #goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
             for i_p, p in enumerate(population):
                 heb_coeffs_try = np.array(self._get_params_try(self.coeffs, p))
-                goals = np.array([self.iteration, i_p])
+                goals = np.array([self.iteration, i_p, self.id])
 
                 if self.environment == 'icub_skin-v0':
                     #goals = np.array([rand_bounds(bounds)[0] for i in range(self.env.metadata['maxEpisodeSteps'])])
@@ -416,7 +417,8 @@ class EvolutionStrategyHebb(object):
             mkdir(path + '/' + id_)
             
         print('Run: ' + id_ + '\n\n........................................................................\n')
-            
+        self.id = int(id_)
+        
         pool = mp.Pool(self.num_threads) if self.num_threads > 1 else None
         
         generations_rewards = []
@@ -455,6 +457,12 @@ class EvolutionStrategyHebb(object):
                         
                 generations_rewards.append(rew_)
                 np.save(path + "/"+ id_ + '/Fitness_values_' + id_ + '_' + self.environment + '.npy', np.array(generations_rewards))
+
+                output_file = f'output/{self.id:d}.hdf5'
+                with h5py.File(output_file, 'a') as f:
+                    f.create_dataset('rewards', data=generations_rewards)
+                    f.attrs['mean_reward'] = rew_
+                    f.attrs['max_reward'] = np.max(rewards)
        
         if pool is not None:
             pool.close()

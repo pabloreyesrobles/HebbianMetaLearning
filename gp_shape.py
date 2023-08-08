@@ -6,8 +6,8 @@ import re
 
 class GaussianProcessShapeRegressor:
     def __init__(self, alpha=0.001, n_restarts_optimizer=20):
-        self.kernel = 1e-3 * RBF(length_scale=1e-2, length_scale_bounds=(1e-23, 1e10)) + \
-                      WhiteKernel(noise_level=5e-5, noise_level_bounds=(1e-23, 1e10))
+        self.kernel = RBF(length_scale=(1e-3, 1e-3), length_scale_bounds=(1e-2, 0.8)) + \
+                      WhiteKernel(noise_level=1e-4, noise_level_bounds=(1e-7, 1))
         self.model = GaussianProcessRegressor(kernel=self.kernel, alpha=alpha, n_restarts_optimizer=n_restarts_optimizer)
         
     def add_data_point(self, x_new, y_new):

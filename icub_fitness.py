@@ -21,6 +21,7 @@ import time
 
 from gp_shape import GaussianProcessShapeRegressor
 from scipy.ndimage import gaussian_filter
+import h5py
 
 def norm_goal(goal):
     return (goal - 250.0) / 250.0
@@ -226,16 +227,36 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
         state = np.concatenate([observation['effector_pose'], np.zeros(29)]) #or maybe included in env.get_obs()
         no_reward_cnt = 0
 
+        pose_arr = []
+
         #for i_g in range(steps):
         while True:
+            # Initialize an array to store the activations of each kernel
+            sigma = 20
+            kernel_activations = []
+            touch_data = np.zeros([515, 515])
+
+            for j, t in enumerate(observation['skin']['torso']):
+                if t != 0.0:
+                    t_x, t_y = env.SKIN_COORDINATES[-1][1][j], env.SKIN_COORDINATES[-1][2][j]
+                    touch_data[t_x, t_y] = t / 255.0
+
+            # Iterate over the centers of the Gaussian kernels
+            for center in kcenters:
+                # Apply the Gaussian filter at the specified center
+                kernel_activation = apply_gaussian_filter(touch_data, center, sigma=sigma)
+
+                # Append the activation to the array
+                kernel_activations.append(kernel_activation)
+
+            state = np.concatenate([observation['effector_pose'], kernel_activations])
             
             def norm_cmd(cmd):
                 arm_low, arm_high = env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7]
                 return 2 * (cmd - arm_low) / (arm_high - arm_low) - 1
 
             #observation = np.concatenate([norm_cmd(env.get_obs()['joints']['left_arm'][0:7]), norm_goal(g)])
-            #observation = norm_goal(g)
-            
+            #observation = norm_goal(g)            
 
             o0, o1, o2, o3 = p([state])
             o0 = o0.numpy()
@@ -243,7 +264,7 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
             o2 = o2.numpy()
 
             # TODO: check what is the best activation for the end effector pose
-            o3 = torch.tanh(o3).numpy() 
+            o3 = torch.tanh(o3).numpy() * 0.1
             # o3 = o3.numpy()
             # o3 = np.clip(o3, env.action_space['left_arm'].low[0:7], env.action_space['left_arm'].high[0:7])
 
@@ -267,47 +288,28 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
 
             if reward > 0:
                 no_reward_cnt = 0
-                with open('output/effector_pos/pos_' + str(goal[0]) + '_' + str(goal[1]) + '.txt', 'a+') as f:
-                    pose = observation['effector_pose']
+                #with open('output/effector_pos/pos_' + str(goal[0]) + '_' + str(goal[1]) + '.txt', 'a+') as f:
+                pose = observation['effector_pose']
+                pose_arr.append(pose)
 
-                    X_norm = pose_norm(pose[1:3], min_value, max_value, original_min, original_max)
-                    y_norm = pose_norm(pose[0], 0.0, 1.0, -0.2, 0.0)
+                X_norm = pose_norm(pose[1:3], min_value, max_value, original_min, original_max)
+                y_norm = pose_norm(pose[0], 0.0, 1.0, -0.2, 0.0)
 
-                    gp_regressor.add_data_point(X_norm, y_norm)
-                    f.write(f'{pose[0]:f},{pose[1]:f},{pose[2]:f}\n')
+                gp_regressor.add_data_point(X_norm, y_norm)
+                #f.write(f'{pose[0]:f},{pose[1]:f},{pose[2]:f}\n')
 
-                    if init_std == None:
-                        _, std = gp_regressor.predict_shape(pos_grid)
-                        init_std = np.mean(std)
+                if init_std == None:
+                    _, std = gp_regressor.predict_shape(pos_grid)
+                    init_std = np.mean(std)
             else:                
                 no_reward_cnt += 1
-
-            # Initialize an array to store the activations of each kernel
-            sigma = 20
-            kernel_activations = []
-            touch_data = np.zeros([515, 515])
-
-            for j, t in enumerate(observation['skin']['torso']):
-                if t != 0.0:
-                    t_x, t_y = env.SKIN_COORDINATES[-1][1][j], env.SKIN_COORDINATES[-1][2][j]
-                    touch_data[t_x, t_y] = t / 255.0
-
-            # Iterate over the centers of the Gaussian kernels
-            for center in kcenters:
-                # Apply the Gaussian filter at the specified center
-                kernel_activation = apply_gaussian_filter(touch_data, center, sigma=sigma)
-
-                # Append the activation to the array
-                kernel_activations.append(kernel_activation)
-
+ 
             # TODO: no nearby point search criteria needed
             # if (torso[0] + torso[1]) > 0:
             #     rew_ep += 25.0 * np.exp(-15.0 * np.linalg.norm(g - np.array(torso)) / np.linalg.norm(np.array([500, 500])))
             rew_ep += reward
 
-            state = np.concatenate([observation['effector_pose'], kernel_activations])
-
-            if no_reward_cnt == 15:
+            if no_reward_cnt == 10:
                 break
             
             #### Episodic/Intra-life hebbian update of the weights
@@ -341,9 +343,22 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
                 list(p.parameters())[c].data /= list(p.parameters())[c].__abs__().max()
         
         #env.close()
-    if rew_ep > 10:
-        _, std = gp_regressor.predict_shape(pos_grid)
-        rew_ep += 25 * (init_std - np.mean(std)) / init_std # check factor
+        if rew_ep > 0:
+            _, std = gp_regressor.predict_shape(pos_grid)
+            int_rew = 20 * (init_std - np.mean(std)) / init_std # check factor
+
+            output_file = f'output/{goal[2]:d}.hdf5'
+            with h5py.File(output_file, 'a') as f:
+                g = f.require_group(f'gen{goal[0]:d}')
+                p = g.create_dataset(f'pop{goal[1]:d}', data=np.array(pose_arr))
+                p.attrs['fitness'] = rew_ep
+                p.attrs['init_std'] = init_std
+                p.attrs['std'] = np.mean(std)
+                p.attrs['ext_rew'] = rew_ep
+                p.attrs['int_rew'] = int_rew
+                p.attrs['rew_ep'] = rew_ep + int_rew
+
+            rew_ep += int_rew
 
     return rew_ep
     # return max(rew_ep, 0)
