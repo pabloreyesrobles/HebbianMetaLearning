@@ -422,6 +422,7 @@ class EvolutionStrategyHebb(object):
         pool = mp.Pool(self.num_threads) if self.num_threads > 1 else None
         
         generations_rewards = []
+        max_generation_rewards = []
 
         for iteration in range(iterations):                                                                         # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
             self.iteration = iteration
@@ -456,13 +457,13 @@ class EvolutionStrategyHebb(object):
                         torch.save(self.get_coevolved_parameters(),  path + "/"+ id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(int(rew_)) + '__' + self.hebb_rule + "__init_" + str(self.init_weights) + "__pop_" + str(self.POPULATION_SIZE) + '__CNN_parameters' + "__{}.dat".format(iteration))
                         
                 generations_rewards.append(rew_)
+                max_generation_rewards.append(rewards.max())
                 np.save(path + "/"+ id_ + '/Fitness_values_' + id_ + '_' + self.environment + '.npy', np.array(generations_rewards))
 
-                output_file = f'output/{self.id:d}.hdf5'
-                with h5py.File(output_file, 'a') as f:
-                    f.create_dataset('rewards', data=generations_rewards)
-                    f.attrs['mean_reward'] = rew_
-                    f.attrs['max_reward'] = np.max(rewards)
+        output_file = f'output/{self.id:d}.hdf5'
+        with h5py.File(output_file, 'a') as f:
+            f.create_dataset('rewards', data=generations_rewards)
+            f.create_dataset('max_rewards', data=max_generation_rewards)
        
         if pool is not None:
             pool.close()
