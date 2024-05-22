@@ -290,7 +290,8 @@ def fitness_hebb(hebb_rule : str, environment : gym.Env, goal: List[np.array], i
                 no_reward_cnt = 0
                 #with open('output/effector_pos/pos_' + str(goal[0]) + '_' + str(goal[1]) + '.txt', 'a+') as f:
                 pose = observation['effector_pose']
-                pose_arr.append(pose)
+                # concat observation['skin']['torso'] to pose and add to pose_arr, note that the first is np.array and the second is list
+                pose_arr.append(np.concatenate([pose, observation['skin']['torso']]))
 
                 X_norm = pose_norm(pose[1:3], min_value, max_value, original_min, original_max)
                 y_norm = pose_norm(pose[0], 0.0, 1.0, -0.2, 0.0)
